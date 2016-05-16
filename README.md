@@ -3,7 +3,7 @@ Convert astronomical images to multi-epoch 'footprint' files for sources of inte
 
 ## Footprint file specification
 
-[](doc/Footprint_specification.png)
+![Footprint specification diagram](doc/Footprint_specification.png)
 
 ## People
 

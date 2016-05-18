@@ -38,6 +38,7 @@ k_g3_primary_diameters = {"ground": 8.2, "space": 2.4}
 k_filter_name = 'r'
 k_filter_central_wavelengths = {'r':620.}
 
+
 def get_background_and_noise_var(data, clip_n_sigma=3, clip_converg_tol=0.1,
     verbose=False):
     """
@@ -98,113 +99,104 @@ def get_background_and_noise_var(data, clip_n_sigma=3, clip_converg_tol=0.1,
     noise_var = float(np.var(x))
     return background, noise_var
 
-def create_segments(subfield_index=0, experiment="control",
-    observation_type="ground", shear_type="constant",
-    n_gals=10000, verbose=False):
-    """
-    Load pixel data and PSFs for all epochs for a given galaxy
-    """
-    if subfield_index < 0 or subfield_index > 199:
-        raise ValueError("subfield_index must be in range [0, 199]")
 
-    ### Reconstruct the GREAT3 image input file path and name
-    indir = os.path.join(os.path.abspath(os.path.dirname(__file__)),
-        "../../great3", experiment, observation_type, shear_type)
+class Epoch(object):
+    """
+    Load an image of stars and galaxies from a FITS file
 
-    ### Collect input image filenames for all epochs.
-    ### FIXME: Get correct 'experiment' names here
-    if experiment in ["control", "real_galaxy", "variable_PSF"]:
-        nepochs = 1
-    else:
-        nepochs = 6
-    infiles = []
-    starfiles = []
-    for epoch_index in xrange(nepochs):
-        infiles.append(os.path.join(indir,
-            "image-{:03d}-{:d}.fits".format(subfield_index, epoch_index)))
-        starfiles.append(os.path.join(indir,
-            "starfield_image-{:03d}-{:d}.fits".format(subfield_index, epoch_index)))
+    - Parse the WCS in the FITS header
+    - Store catalog information to find and cutout select sources
+    """
+    ### Target star and galaxy centroids from SDSS catalog
+    ### RA, DEC in J2000 degrees decimal
+    # star_pos = [[9.924491, 0.964729],
+    #             [9.922445, 0.977756]]
+    # gal_pos = [[9.928746, 0.973612],
+    #            [9.930459, 0.960453]]
+    def __init__(self, infile, gal_pos=None, star_pos=None):
+        self.gal_pos = gal_pos
+        self.star_pos = star_pos
+
+        infile = os.path.join('data', infile)
+        h = fits.getheader(infile)
+        self.w = wcs.WCS(h)
+        f = fits.open(infile)
+        self.im = f[0].data
+        f.close()
+        return None
+    
+    def star_pos_pix(self, istar=0):
+        return np.array(self.w.wcs_world2pix(self.star_pos[istar][0],
+                                             self.star_pos[istar][1], 1)).astype(int)
+
+    def gal_pos_pix(self, igal=0):
+        return np.array(self.w.wcs_world2pix(self.gal_pos[igal][0],
+                                             self.gal_pos[igal][1], 1)).astype(int)
+
+    def get_rect_footprint(self, nx=16, ny=16):
+        """
+        Get a rectangular image footprint around a given catalog object
+
+        @param nx   The number of pixels to cut out along the x-axis
+        @param ny   The number of pixels to cut out along the y-axis
+        """
+        return np.asarray(self.im[(y-ny):(y+ny), (x-nx):(x+nx)])
+
+
+def create_footprints_from_catalog(infiles, seg_filename, 
+                                   gal_catalog=None, star_catalog=None,
+                                   verbose=False):
+    """
+    Create a footprints file for all stars and galaxies in the given catalogs
+
+    @param gal_catalog  A dict with fields: 
+                        'ra', 'dec', 'star_ra', 'star_dec', 'filter_name',
+                        'telescope_name'
+    """
     if verbose:
         print "input files:", infiles
-
-
-    ### Load the galaxy catalog for this subfield
-    f = fits.open(os.path.join(indir,
-        "galaxy_catalog-{:03d}.fits".format(subfield_index)))
-    gal_cat = np.core.records.array(np.asarray(f[1].data),
-        dtype=[('x', '>i8'), ('y', '>i8'), ('ID', '>i8')])
-    f.close()
+        print "star input files:", starfiles
 
     ### Specify the output filename for the Segments
-    segdir = os.path.join(indir, "segments")
+    segdir = os.path.join(indir, "footprints")
     if not os.path.exists(segdir):
         os.makedirs(segdir)
-    seg_filename = os.path.join(segdir, "seg_{:03d}.h5".format(subfield_index))
+    seg_filename = os.path.join(segdir, seg_filename)
     if verbose:
         print "seg_filename:", seg_filename
 
     ### Set some common metadata required by the Segment file structure
-    # telescope_name = "GREAT3_{}".format(observation_type)
-    telescope_name = {"ground": "LSST", "space": "WFIRST"}[observation_type]
-    if verbose:
-        print "telescope_name:", telescope_name
-    filter_name = k_filter_name
     dummy_mask = 1.0
-    dummy_background = 0.0
 
     ### Create and fill the elements of the segment file for all galaxies
     ### in the current sub-field. Different sub-fields go in different segment
     ### files (no particular reason for this - just seems convenient).
     seg = Footprints(seg_filename)
 
-    ### There are 1e4 galaxies in one GREAT3 image file.
-    ### Save all images to the segment file, but with distinct 'segment_index'
+    ### Save all images to the footprints file, but with distinct 'segment_index'
     ### values.
-    n_gals_image_file = n_gals
-    ngals_per_dim = 100 ### The image is a 100 x 100 grid of galaxies
-    for igal in xrange(n_gals_image_file):
-        if verbose and np.mod(igal, 100) == 0:
-            print "Galaxy {:d} / {:d}".format(igal+1, n_gals_image_file)
-        ### Specify input image grid ranges for this segment
-        ng = k_g3_ngrid[observation_type]
-        i, j = np.unravel_index(igal, (ngals_per_dim, ngals_per_dim))
-        ### These lines define the order in which we sort the postage stamps
-        ### into segment indices:
-        xmin = j * ng
-        xmax = (j+1) * ng
-        ymin = i * ng
-        ymax = (i+1) * ng
+    images = []
+    psfs = []
+    noise_vars = []
+    backgrounds = []
+    for ifile, infile in enumerate(infiles): # Iterate over epochs
+        e = Epoch(infile)
 
-        images = []
-        psfs = []
-        noise_vars = []
-        backgrounds = []
-        for ifile, infile in enumerate(infiles): # Iterate over epochs, select same galaxy
-            f = fits.open(infile)
-            images.append(np.asarray(f[0].data[ymin:ymax, xmin:xmax],
-                dtype=np.float64))
-            bkgrnd, noise_var = get_background_and_noise_var(f[0].data)
-            noise_vars.append(noise_var)
-            backgrounds.append(bkgrnd)
-            # print "empirical nosie variance: {:5.4g}".format(np.var(f[0].data))
-            f.close()
+        images.append(e.get_rect_footprint())
+        bkgrnd, noise_var = get_background_and_noise_var(e.im)
+        noise_vars.append(noise_var)
+        backgrounds.append(bkgrnd)
+        # print "empirical nosie variance: {:5.4g}".format(np.var(f[0].data))
 
-            s = fits.open(starfiles[ifile])
-            ### Select just the perfectly centered star image for the PSF model.
-            ### There are 8 other postage stamps (for constant PSF branches)
-            ### that have offset star locations with respect to the pixel grid.
-            ### It's not clear we need these for JIF modeling until we're
-            ### marginalizing the PSF model.
-            psfs.append(np.asarray(s[0].data[0:ng, 0:ng], dtype=np.float64))
-            s.close()
+        psfs.append(e.get_rect_footprint())
 
-        print "noise_vars:", noise_vars
-        seg.save_images(images, noise_vars, [dummy_mask], backgrounds,
-            segment_index=igal, telescope=telescope_name)
-        seg.save_psf_images(psfs, segment_index=igal, telescope=telescope_name,
-            filter_name=filter_name, model_names=None)
-        seg.save_source_catalog(np.reshape(gal_cat[igal], (1,)),
-            segment_index=igal)
+    print "noise_vars:", noise_vars
+    seg.save_images(images, noise_vars, [dummy_mask], backgrounds,
+        segment_index=igal, telescope=telescope_name)
+    seg.save_psf_images(psfs, segment_index=igal, telescope=telescope_name,
+        filter_name=filter_name, model_names=None)
+    seg.save_source_catalog(np.reshape(gal_cat[igal], (1,)),
+        segment_index=igal)
 
     # ### It's not strictly necessary to instantiate a GalSimGalaxyModel object
     # ### here, but it's useful to do the parsing of existing bandpass files to
@@ -223,40 +215,24 @@ def create_segments(subfield_index=0, experiment="control",
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Parse GREAT3 data file and save as galaxy segment files.')
+        description='Parse multi-epoch image FITS files and save as a footprint HDF5 file.')
 
-    parser.add_argument('--subfield_index', type=int, default=0,
-                        help="GREAT3 data set subfield index (0-199) [Default: 0]")
+    parser.add_argument('--infiles', type=str, nargs='+',
+                        help="Input image FITS files")
 
-    parser.add_argument('--experiment', type=str, default="control",
-                        help="GREAT3 'experiment' name. [Default: control]")
-
-    parser.add_argument('--observation_type', type=str, default="ground",
-                        help="GREAT3 'observation' type (ground/space) [Default: ground]")
-
-    parser.add_argument('--shear_type', type=str, default="constant",
-                        help="GREAT shear type [Default: constant]")
-
-    parser.add_argument('--n_gals', type=int, default=10,
-                        help="How many galaxies to process from a sub-field? [Default: 10]")
+    parser.add_argument('--outfile', type=str, default='footprint.h5',
+                        help="Name of the output HDF5 file (Default: footprint.h5)")
 
     parser.add_argument('--verbose', action='store_true',
                         help="Enable verbose messaging")
 
     args = parser.parse_args()
-    logging.debug('Creating segment file for subfield {:d}'.format(
-        args.subfield_index))
+    logging.debug('Creating footprint file for {:d} epochs'.format(len(args.infiles)))
 
 
-    create_segments(subfield_index=args.subfield_index,
-                    experiment=args.experiment,
-                    observation_type=args.observation_type,
-                    shear_type=args.shear_type,
-                    n_gals=args.n_gals,
-                    verbose=args.verbose)
+    create_footprints_from_catalog(args.infiles, args.outfile, verbose=args.verbose)
 
-    logging.debug('Finished creating segment for subfield {:d}'.format(
-        args.subfield_index))
+    logging.debug('Finished creating footprint file')
     return 0
 
 

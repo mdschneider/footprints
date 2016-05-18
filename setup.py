@@ -10,7 +10,7 @@ setup(name='footprints',
       packages=['footprints'],
       entry_points = {
       	'console_scripts': ['convert_to_footprint=footprints.convert_to_footprint:main',
-      						'show_footprint=footprints.show_footprint:main']
+      				  'show_footprint=footprints.show_footprint:main']
       },
       zip_safe=False)
 3

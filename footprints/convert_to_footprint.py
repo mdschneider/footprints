@@ -10,7 +10,9 @@ import argparse
 import sys
 import os.path
 import numpy as np
-#import pandas as pd
+import json
+import ConfigParser
+import pandas as pd
 #import matplotlib.pyplot as plt
 
 from astropy.io import fits
@@ -37,6 +39,34 @@ k_g3_primary_diameters = {"ground": 8.2, "space": 2.4}
 ### Guess that GREAT3 used LSST 'r' band to render images
 k_filter_name = 'r'
 k_filter_central_wavelengths = {'r':620.}
+
+
+class ConfigFileParser(object):
+    """
+    Parse a configuration file for this script 
+    """
+    def __init__(config_file_name):
+        self.config_file = config_file_name
+
+        config = ConfigParser.RawConfigParser()
+        config.read(config_file_name)
+
+        infiles = config.items("infiles")
+        print "infiles:"
+        for key, infile in self.infiles:
+            print infile
+        self.infiles = [infile for key, infile in infiles]
+
+        self.outfile = config.get('output', 'outfile')
+
+        self.telescope_name = config.get('metadata', 'telescope_name')
+        self.filter_name = config.get('metadata', 'filter_name')
+
+        self.catalog_file = config.get('catalog', 'catalog_file')
+
+        self.nx_stamp = config.get('stamps', 'nx')
+        self.ny_stamp = config.get('stamps', 'ny')
+        return None    
 
 
 def get_background_and_noise_var(data, clip_n_sigma=3, clip_converg_tol=0.1,
@@ -143,9 +173,16 @@ class Epoch(object):
         return np.asarray(self.im[(y-ny):(y+ny), (x-nx):(x+nx)])
 
 
-def create_footprints_from_catalog(infiles, seg_filename, 
-                                   gal_catalog=None, star_catalog=None,
-                                   verbose=False):
+def _set_outfile_with_path(footprint_filename):
+    """
+    Specify the output file name for the Footprints including the correct path
+    """
+    segdir = os.path.join(indir, "footprints")
+    if not os.path.exists(segdir):
+        os.makedirs(segdir)
+    return os.path.join(segdir, footprint_filename)
+
+def create_footprints_from_catalog(params, verbose=False):
     """
     Create a footprints file for all stars and galaxies in the given catalogs
 
@@ -153,50 +190,65 @@ def create_footprints_from_catalog(infiles, seg_filename,
                         'ra', 'dec', 'star_ra', 'star_dec', 'filter_name',
                         'telescope_name'
     """
-    if verbose:
-        print "input files:", infiles
-        print "star input files:", starfiles
+    ### Read the catalog file
+    ### The number of rows defines the number of unique sources (or 
+    ### 'footprints') in the output file. The catalog RA, DEC values define 
+    ### where to look for sources in the input images.
+    catalog = pd.read_csv(params.catalog_file)
+    n_sources = len(catalog.index)
 
-    ### Specify the output filename for the Segments
-    segdir = os.path.join(indir, "footprints")
-    if not os.path.exists(segdir):
-        os.makedirs(segdir)
-    seg_filename = os.path.join(segdir, seg_filename)
+    footprint_filename = _set_outfile_with_path(params.outfile)
     if verbose:
-        print "seg_filename:", seg_filename
+        print "Output file name:", footprint_filename
 
     ### Set some common metadata required by the Segment file structure
     dummy_mask = 1.0
+    dummy_psf = 1.0
 
     ### Create and fill the elements of the segment file for all galaxies
     ### in the current sub-field. Different sub-fields go in different segment
     ### files (no particular reason for this - just seems convenient).
-    seg = Footprints(seg_filename)
+    seg = Footprints(footprint_filename)
 
     ### Save all images to the footprints file, but with distinct 'segment_index'
-    ### values.
-    images = []
-    psfs = []
-    noise_vars = []
-    backgrounds = []
-    for ifile, infile in enumerate(infiles): # Iterate over epochs
-        e = Epoch(infile)
+    ### values for distinct sources (galaxies or stars).
+    for isrc in xrange(n_sources):
+        images = []
+        psfs = []
+        psf_model_names = []
+        noise_vars = []
+        backgrounds = []
+        for ifile, infile in enumerate(infiles): # Iterate over epochs
+            e = Epoch(infile)
 
-        images.append(e.get_rect_footprint())
-        bkgrnd, noise_var = get_background_and_noise_var(e.im)
-        noise_vars.append(noise_var)
-        backgrounds.append(bkgrnd)
-        # print "empirical nosie variance: {:5.4g}".format(np.var(f[0].data))
+            images.append(e.get_rect_footprint(catalog['RA'][isrc],
+                                               catalog['DEC'][isrc],
+                                               nx=params.nx_stamp,
+                                               ny=params.ny_stamp))
+            bkgrnd, noise_var = get_background_and_noise_var(e.im)
+            noise_vars.append(noise_var)
+            backgrounds.append(bkgrnd)
+            # print "empirical nosie variance: {:5.4g}".format(np.var(f[0].data))
 
-        psfs.append(e.get_rect_footprint())
+            ### Assuming we don't have images of galaxy PSFs, put a dummy value for the PSF
+            ### and specify a PSF modeling class for JIF to parse and create a PSF model
+            psfs.append(dummy_psf)
+            psf_model_names.append('PSFModel class')
 
-    print "noise_vars:", noise_vars
-    seg.save_images(images, noise_vars, [dummy_mask], backgrounds,
-        segment_index=igal, telescope=telescope_name)
-    seg.save_psf_images(psfs, segment_index=igal, telescope=telescope_name,
-        filter_name=filter_name, model_names=None)
-    seg.save_source_catalog(np.reshape(gal_cat[igal], (1,)),
-        segment_index=igal)
+        print "noise_vars:", noise_vars
+        seg.save_images(images,
+                        noise_vars, 
+                        [dummy_mask],
+                        backgrounds,
+                        segment_index=isrc, 
+                        telescope=params.telescope_name)
+        seg.save_psf_images(psfs,
+                            segment_index=isrc,
+                            telescope=params.telescope_name,
+                            filter_name=params.filter_name,
+                            model_names=psf_model_names)
+        seg.save_source_catalog(np.reshape(gal_cat[isrc], (1,)),
+                                segment_index=isrc)
 
     # ### It's not strictly necessary to instantiate a GalSimGalaxyModel object
     # ### here, but it's useful to do the parsing of existing bandpass files to
@@ -217,22 +269,36 @@ def main():
     parser = argparse.ArgumentParser(
         description='Parse multi-epoch image FITS files and save as a footprint HDF5 file.')
 
+    parser.add_argument('--config_file', type=str, default=None,
+                        help="Name of a configuration file listing inputs." +
+                             "If specified, ignore other command line flags." +
+                             "(Default: None)")
+
     parser.add_argument('--infiles', type=str, nargs='+',
                         help="Input image FITS files")
 
-    parser.add_argument('--outfile', type=str, default='footprint.h5',
-                        help="Name of the output HDF5 file (Default: footprint.h5)")
+    parser.add_argument('--outfile', type=str, default='footprints.h5',
+                        help="Name of the output HDF5 file (Default: footprints.h5)")
 
     parser.add_argument('--verbose', action='store_true',
                         help="Enable verbose messaging")
 
     args = parser.parse_args()
+
+    ###
+    ### Get the parameters for input/output from configuration file or argument list
+    ###
+    if isinstance(args.config_file, str):
+        logging.info('Reading from configuration file {}'.format(args.config_file))
+        args = ConfigFileParser(args.config_file)
+    elif not isinstance(args.infiles, list):
+        raise ValueError("Must specify either 'config_file' or 'infiles' argument")
+
     logging.debug('Creating footprint file for {:d} epochs'.format(len(args.infiles)))
 
+    create_footprints_from_catalog(args, verbose=args.verbose)
 
-    create_footprints_from_catalog(args.infiles, args.outfile, verbose=args.verbose)
-
-    logging.debug('Finished creating footprint file')
+    logging.debug('Finished creating footprint file')    
     return 0
 
 

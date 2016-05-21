@@ -16,6 +16,7 @@ import pandas as pd
 #import matplotlib.pyplot as plt
 
 from astropy.io import fits
+from astropy import wcs
 from footprints import Footprints
 
 import logging
@@ -29,23 +30,16 @@ logging.basicConfig(level=logging.DEBUG,
 #                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-### Number of pixels per galaxy postage stamp, per dimension
-k_g3_ngrid = {"ground": 48, "space": 96}
-### Pixel scales in arcseconds
-k_g3_pixel_scales = {"ground": 0.2, "space_single_epoch": 0.05,
-                     "space_multi_epoch": 0.1}
-### Guess what values were used to simulate optics PSFs
-k_g3_primary_diameters = {"ground": 8.2, "space": 2.4}
-### Guess that GREAT3 used LSST 'r' band to render images
-k_filter_name = 'r'
-k_filter_central_wavelengths = {'r':620.}
+### How to convert source_type labels to integers for output catalogs
+source_type_index = {'star': 0, 'galaxy': 1}
+
 
 
 class ConfigFileParser(object):
     """
     Parse a configuration file for this script 
     """
-    def __init__(config_file_name):
+    def __init__(self, config_file_name):
         self.config_file = config_file_name
 
         config = ConfigParser.RawConfigParser()
@@ -53,19 +47,22 @@ class ConfigFileParser(object):
 
         infiles = config.items("infiles")
         print "infiles:"
-        for key, infile in self.infiles:
+        for key, infile in infiles:
             print infile
         self.infiles = [infile for key, infile in infiles]
 
-        self.outfile = config.get('output', 'outfile')
+        self.data_dir = os.path.expanduser(config.get('metadata', 'data_dir'))
+        self.outfile = config.get('metadata', 'outfile')
 
         self.telescope_name = config.get('metadata', 'telescope_name')
+        self.primary_diam = float(config.get('metadata', 'primary_diameter'))
+        self.pixel_scale = float(config.get('metadata', 'pixel_scale'))
         self.filter_name = config.get('metadata', 'filter_name')
 
-        self.catalog_file = config.get('catalog', 'catalog_file')
+        self.catalog_file = config.get('metadata', 'catalog_file')
 
-        self.nx_stamp = config.get('stamps', 'nx')
-        self.ny_stamp = config.get('stamps', 'ny')
+        self.nx_stamp = int(config.get('stamps', 'nx'))
+        self.ny_stamp = int(config.get('stamps', 'ny'))
         return None    
 
 
@@ -147,7 +144,7 @@ class Epoch(object):
         self.gal_pos = gal_pos
         self.star_pos = star_pos
 
-        infile = os.path.join('data', infile)
+        infile = os.path.join(infile)
         h = fits.getheader(infile)
         self.w = wcs.WCS(h)
         f = fits.open(infile)
@@ -155,29 +152,27 @@ class Epoch(object):
         f.close()
         return None
     
-    def star_pos_pix(self, istar=0):
-        return np.array(self.w.wcs_world2pix(self.star_pos[istar][0],
-                                             self.star_pos[istar][1], 1)).astype(int)
+    def pos_in_pixels(self, ra, dec):
+        return np.array(self.w.wcs_world2pix(ra, dec, 1)).astype(int)
 
-    def gal_pos_pix(self, igal=0):
-        return np.array(self.w.wcs_world2pix(self.gal_pos[igal][0],
-                                             self.gal_pos[igal][1], 1)).astype(int)
-
-    def get_rect_footprint(self, nx=16, ny=16):
+    def get_rect_footprint(self, ra, dec, nx=16, ny=16):
         """
         Get a rectangular image footprint around a given catalog object
 
         @param nx   The number of pixels to cut out along the x-axis
         @param ny   The number of pixels to cut out along the y-axis
         """
+        pos = self.pos_in_pixels(ra, dec)
+        x = pos[0]
+        y = pos[1]
         return np.asarray(self.im[(y-ny):(y+ny), (x-nx):(x+nx)])
 
 
-def _set_outfile_with_path(footprint_filename):
+def _set_outfile_with_path(indir, footprint_filename):
     """
     Specify the output file name for the Footprints including the correct path
     """
-    segdir = os.path.join(indir, "footprints")
+    segdir = os.path.join(indir, 'footprints')
     if not os.path.exists(segdir):
         os.makedirs(segdir)
     return os.path.join(segdir, footprint_filename)
@@ -194,12 +189,15 @@ def create_footprints_from_catalog(params, verbose=False):
     ### The number of rows defines the number of unique sources (or 
     ### 'footprints') in the output file. The catalog RA, DEC values define 
     ### where to look for sources in the input images.
-    catalog = pd.read_csv(params.catalog_file)
+    ### *** We're assuming throughout that no sources are blended ***
+    catalog = pd.read_csv(os.path.join(params.data_dir, params.catalog_file))
+    catalog['source_type'] = catalog['source_type'].apply(source_type_index.get).astype(float)
     n_sources = len(catalog.index)
+    print "Catalog:\n", catalog
 
-    footprint_filename = _set_outfile_with_path(params.outfile)
-    if verbose:
-        print "Output file name:", footprint_filename
+    footprint_filename = _set_outfile_with_path(params.data_dir, params.outfile)
+    # if verbose:
+    print "Output file name:", footprint_filename
 
     ### Set some common metadata required by the Segment file structure
     dummy_mask = 1.0
@@ -212,14 +210,17 @@ def create_footprints_from_catalog(params, verbose=False):
 
     ### Save all images to the footprints file, but with distinct 'segment_index'
     ### values for distinct sources (galaxies or stars).
+    ### Assuming no blending.
     for isrc in xrange(n_sources):
+        print "--- Saving segment {:d} ---".format(isrc)
         images = []
         psfs = []
         psf_model_names = []
         noise_vars = []
         backgrounds = []
-        for ifile, infile in enumerate(infiles): # Iterate over epochs
-            e = Epoch(infile)
+        masks = []
+        for ifile, infile in enumerate(params.infiles): # Iterate over epochs
+            e = Epoch(os.path.join(params.data_dir,infile))
 
             images.append(e.get_rect_footprint(catalog['RA'][isrc],
                                                catalog['DEC'][isrc],
@@ -228,6 +229,7 @@ def create_footprints_from_catalog(params, verbose=False):
             bkgrnd, noise_var = get_background_and_noise_var(e.im)
             noise_vars.append(noise_var)
             backgrounds.append(bkgrnd)
+            masks.append(dummy_mask)
             # print "empirical nosie variance: {:5.4g}".format(np.var(f[0].data))
 
             ### Assuming we don't have images of galaxy PSFs, put a dummy value for the PSF
@@ -238,17 +240,22 @@ def create_footprints_from_catalog(params, verbose=False):
         print "noise_vars:", noise_vars
         seg.save_images(images,
                         noise_vars, 
-                        [dummy_mask],
+                        masks,
                         backgrounds,
                         segment_index=isrc, 
-                        telescope=params.telescope_name)
+                        telescope=params.telescope_name,
+                        filter_name=params.filter_name)
         seg.save_psf_images(psfs,
                             segment_index=isrc,
                             telescope=params.telescope_name,
                             filter_name=params.filter_name,
                             model_names=psf_model_names)
-        seg.save_source_catalog(np.reshape(gal_cat[isrc], (1,)),
-                                segment_index=isrc)
+        cat_out = catalog.iloc[isrc][['RA', 'DEC', 'source_type']]
+
+        print "Saving catalog:", cat_out
+        seg.save_source_catalog(np.array([cat_out.values]),
+                                segment_index=isrc,
+                                column_names=list(cat_out.index.values))
 
     # ### It's not strictly necessary to instantiate a GalSimGalaxyModel object
     # ### here, but it's useful to do the parsing of existing bandpass files to
@@ -258,10 +265,10 @@ def create_footprints_from_catalog(params, verbose=False):
     # gg.save_bandpasses_to_segment(seg, gg_obj, k_filter_name, telescope_name,
     #     scale={"LSST": 1.0, "WFIRST": 1.e3}[telescope_name])
 
-    # seg.save_tel_metadata(telescope=telescope_name,
-    #                       primary_diam=k_g3_primary_diameters[observation_type],
-    #                       pixel_scale_arcsec=k_g3_pixel_scales[observation_type],
-    #                       atmosphere=(observation_type == "ground"))
+    seg.save_tel_metadata(telescope=params.telescope_name,
+                          primary_diam=params.primary_diam,
+                          pixel_scale_arcsec=params.pixel_scale,
+                          atmosphere=True)
     return None
 
 
@@ -284,6 +291,7 @@ def main():
                         help="Enable verbose messaging")
 
     args = parser.parse_args()
+    verbose = args.verbose
 
     ###
     ### Get the parameters for input/output from configuration file or argument list
@@ -291,12 +299,13 @@ def main():
     if isinstance(args.config_file, str):
         logging.info('Reading from configuration file {}'.format(args.config_file))
         args = ConfigFileParser(args.config_file)
+
     elif not isinstance(args.infiles, list):
         raise ValueError("Must specify either 'config_file' or 'infiles' argument")
 
     logging.debug('Creating footprint file for {:d} epochs'.format(len(args.infiles)))
 
-    create_footprints_from_catalog(args, verbose=args.verbose)
+    create_footprints_from_catalog(args, verbose=verbose)
 
     logging.debug('Finished creating footprint file')    
     return 0

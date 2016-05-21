@@ -36,7 +36,7 @@ class Footprints(object):
         self.file = h5py.File(segment_file, 'w')
 
     def _segment_group_name(self, segment_index, telescope, filter_name):
-        return 'Footprints/seg{:d}/{}/{}'.format(segment_index, telescope,
+        return 'Footprints/seg{:d}/{}/{}'.format(segment_index, telescope.lower(),
             filter_name)
 
     def save_tel_metadata(self, telescope='lsst',
@@ -66,7 +66,7 @@ class Footprints(object):
         g.attrs['atmosphere'] = atmosphere
         return None
 
-    def save_source_catalog(self, seg_srcs, segment_index=0):
+    def save_source_catalog(self, seg_srcs, segment_index=0, column_names=None):
         """
         List the identified sources and associated properties for each segment.
 
@@ -75,8 +75,10 @@ class Footprints(object):
         @param segment_index    Integer index for the segment in the file
         """
         seg = create_group(self.file, 'Footprints/seg{:d}'.format(segment_index))
-        seg.create_dataset('catalog', data=seg_srcs)
+        seg.create_dataset('catalog', data=seg_srcs.tolist())
         seg.attrs['num_sources'] = seg_srcs.shape[0]
+        if column_names is not None:
+            seg.attrs['catalog_columns'] = column_names
         return None
 
     def save_wcs(self):

@@ -28,7 +28,7 @@ def create_group(f, group_name):
 
 class Footprints(object):
     """
-    I/O for galaxy image Footprints
+    I/O for galaxy and star image Footprints
     """
     def __init__(self, segment_file):
         self.segment_file = segment_file

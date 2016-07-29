@@ -191,12 +191,12 @@ def main():
 
     # plot_single_epoch(args.hdf5filename, args.segment_num, args.telescope, args.filter, args.epoch_num)
 
-    # plot_all_epochs(args.hdf5filename, args.segment_num, args.telescope, args.filter)
+    plot_all_epochs(args.hdf5filename, args.segment_num, args.telescope, args.filter)
 
-    model_paramnames = ['psf_fwhm', 'psf_e', 'psf_beta', 'psf_mag']
-    model_params = [1.3, 0.0, 0.0, 28.6]
-    plot_image_and_model(args.hdf5filename, args.segment_num, args.telescope, args.filter, args.epoch_num,
-                         active_params=model_paramnames, parameters=model_params)
+    # model_paramnames = ['psf_fwhm', 'psf_e', 'psf_beta', 'psf_mag']
+    # model_params = [1.3, 0.0, 0.0, 28.6]
+    # plot_image_and_model(args.hdf5filename, args.segment_num, args.telescope, args.filter, args.epoch_num,
+    #                      active_params=model_paramnames, parameters=model_params)
     return 0    
 
 if __name__ == "__main__":

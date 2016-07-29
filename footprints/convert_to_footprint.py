@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # encoding: utf-8
 """
-sheller_great3.py
+convert_to_footprint.py
 
-Created by Michael Schneider on 2015-10-16
+Parse multi-epoch image FITS files and save as a footprint HDF5 file.
 """
 
 import argparse
 import sys
 import os.path
 import numpy as np
-import json
+# import json
 import ConfigParser
 import pandas as pd
 #import matplotlib.pyplot as plt

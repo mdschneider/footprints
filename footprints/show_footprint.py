@@ -45,16 +45,17 @@ def plot_single_epoch(file_name, segment, telescope, filter_name, epoch_num, out
     im = ax0.imshow(g_img, origin='lower', interpolation='nearest', cmap=plt.cm.pink)
     fig.colorbar(im)
     
-    ax0.set_title('Image')
-    ax0.set_ylabel('y [pixels]')
-    ax0.set_xlabel('x [pixels]')
+    ax0.set_title('Image - Seg {:d}, {} {}-band, epoch {:d}'.format(segment, telescope, 
+        filter_name, epoch_num), fontsize=18)
+    ax0.set_ylabel('y [pixels]', fontsize=18)
+    ax0.set_xlabel('x [pixels]', fontsize=18)
     
     # correct imshow sizes
     ax0.set_adjustable('box-forced')
     fig.subplots_adjust(wspace=0)
     # save the image to file if output name 
     if output_name != None:
-        plt.savefig(output_name)
+        plt.savefig(output_name, bbox_inches='tight')
     
     plt.show()
 
@@ -189,9 +190,9 @@ def main():
 
     args = parser.parse_args()
 
-    # plot_single_epoch(args.hdf5filename, args.segment_num, args.telescope, args.filter, args.epoch_num)
+    plot_single_epoch(args.hdf5filename, args.segment_num, args.telescope, args.filter, args.epoch_num)
 
-    plot_all_epochs(args.hdf5filename, args.segment_num, args.telescope, args.filter)
+    # plot_all_epochs(args.hdf5filename, args.segment_num, args.telescope, args.filter)
 
     # model_paramnames = ['psf_fwhm', 'psf_e', 'psf_beta', 'psf_mag']
     # model_params = [1.3, 0.0, 0.0, 28.6]

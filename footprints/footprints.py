@@ -163,3 +163,25 @@ class Footprints(object):
                     bp.attrs['effective_wavelength'] = effective_wavelengths[i]
                     bp.attrs['effective_wavelength_units'] = 'nanometers'
         return None
+
+
+def load_image(infile, segment=0, telescope="LSST", filter_name="r", epoch=0):
+    """
+    Load a single epoch image from a Footprints file
+    """
+    hfile = h5py.File(infile, 'r')
+    grp = 'Footprints/seg{:d}/{}/{}/epoch_{:d}'.format(segment,
+                                                       telescope.lower(),
+                                                       filter_name, epoch)
+    grp = hfile[grp]
+    img = grp['image'][...]
+    noise_var = grp['noise'][...]
+
+    met = hfile['telescopes/{}'.format(telescope)]
+    scale = met.attrs['pixel_scale_arcsec']
+    gain = met.attrs['gain']
+
+    hfile.close()
+
+    return img, noise_var, scale, gain
+    

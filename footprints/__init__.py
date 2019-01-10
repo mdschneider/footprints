@@ -1,1 +1,1 @@
-from footprints import Footprints, load_image
+from .footprints import Footprints, load_image

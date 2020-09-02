@@ -46,9 +46,9 @@ class ConfigFileParser(object):
         config.read(config_file_name)
 
         infiles = config.items("infiles")
-        print "infiles:"
+        print("infiles:")
         for key, infile in infiles:
-            print infile
+            print(infile)
         self.infiles = [infile for key, infile in infiles]
 
         self.data_dir = os.path.expanduser(config.get('metadata', 'data_dir'))
@@ -105,15 +105,15 @@ def get_background_and_noise_var(data, clip_n_sigma=3, clip_converg_tol=0.1,
         # deviation values.
         sigma_frac_change = np.abs(x_std_new-x_std_old)/((x_std_new+x_std_old)/2.)
         if verbose:
-            print 'Masked {0} outlier values from this iteration.'.format(np.sum(~mask_outliers))
-            print 'Current fractional sigma change between clipping iterations = {0:0.2f}'.format(sigma_frac_change)
+            print('Masked {0} outlier values from this iteration.'.format(np.sum(~mask_outliers)))
+            print('Current fractional sigma change between clipping iterations = {0:0.2f}'.format(sigma_frac_change))
         # Replace old values with estimates from this iteration.
         x_std_old = x_std_new.copy()
         x_median_old = np.median(x)
         # Make sure that we don't have a run away while statement.
         i += 1
         if i > 100:
-            print 'Background variance failed to converge after 100 sigma clipping iterations, exiting.'
+            print('Background variance failed to converge after 100 sigma clipping iterations, exiting.')
             sys.exit()
     # Calculate the clipped image median.
     x_clip_median = np.median(x)
@@ -193,11 +193,11 @@ def create_footprints_from_catalog(params, verbose=False):
     catalog = pd.read_csv(os.path.join(params.data_dir, params.catalog_file))
     catalog['source_type'] = catalog['source_type'].apply(source_type_index.get).astype(float)
     n_sources = len(catalog.index)
-    print "Catalog:\n", catalog
+    print("Catalog:\n", catalog)
 
     footprint_filename = _set_outfile_with_path(params.data_dir, params.outfile)
     # if verbose:
-    print "Output file name:", footprint_filename
+    print("Output file name:", footprint_filename)
 
     ### Set some common metadata required by the Segment file structure
     dummy_mask = 1.0
@@ -212,7 +212,7 @@ def create_footprints_from_catalog(params, verbose=False):
     ### values for distinct sources (galaxies or stars).
     ### Assuming no blending.
     for isrc in xrange(n_sources):
-        print "--- Saving segment {:d} ---".format(isrc)
+        print("--- Saving segment {:d} ---".format(isrc))
         images = []
         psfs = []
         psf_model_names = []
@@ -237,7 +237,7 @@ def create_footprints_from_catalog(params, verbose=False):
             psfs.append(dummy_psf)
             psf_model_names.append('PSFModel class')
 
-        print "noise_vars:", noise_vars
+        print("noise_vars:", noise_vars)
         seg.save_images(images,
                         noise_vars, 
                         masks,
@@ -252,7 +252,7 @@ def create_footprints_from_catalog(params, verbose=False):
                             model_names=psf_model_names)
         cat_out = catalog.iloc[isrc][['RA', 'DEC', 'source_type']]
 
-        print "Saving catalog:", cat_out
+        print("Saving catalog:", cat_out)
         seg.save_source_catalog(np.array([cat_out.values]),
                                 segment_index=isrc,
                                 column_names=list(cat_out.index.values))

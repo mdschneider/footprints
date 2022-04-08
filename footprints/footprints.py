@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
-"""
+'''
 Utility for creating and parsing 'segment' files
 
 A segment file must include the following information:
@@ -9,16 +9,16 @@ A segment file must include the following information:
     - Bandpass information in [group_name]/filters/[filter_name]
 
 Optional additional information might include:
-"""
+'''
 import numpy as np
 import h5py
 
 
 def create_group(f, group_name):
-    """
+    '''
     Create an HDF5 group in f if it does not already exist,
     otherwise just get a reference to it.
-    """
+    '''
     if group_name not in f:
         g = f.create_group(group_name)
     else:
@@ -27,23 +27,22 @@ def create_group(f, group_name):
 
 
 class Footprints(object):
-    """
+    '''
     I/O for galaxy and star image Footprints
-    """
-    def __init__(self, segment_file):
-        self.segment_file = segment_file
+    '''
+    def __init__(self, segment_filename):
+        self.segment_filename = segment_filename
 
-        self.file = h5py.File(segment_file, 'w')
+        self.file = h5py.File(segment_filename, 'w')
 
     def _segment_group_name(self, segment_index, telescope, filter_name):
-        return 'Footprints/seg{:d}/{}/{}'.format(segment_index, telescope.lower(),
-            filter_name)
+        return f'Footprints/seg{segment_index}/{telescope.lower()}/{filter_name}'
 
     def save_tel_metadata(self, telescope='lsst',
                           primary_diam=8.4, pixel_scale_arcsec=0.2,
                           gain=1.0,
                           atmosphere=True):
-        """
+        '''
         Save metadata about the telescope to a 'telescopes' branch of the
         Footprints file.
 
@@ -56,9 +55,9 @@ class Footprints(object):
         @param atmosphere           Bool indicating whether to model an
                                     atmosphere PSF (i.e., are the observations
                                     from ground or space?).
-        """
+        '''
         tel_name = telescope.upper()
-        g = create_group(self.file, 'telescopes/{}'.format(tel_name))
+        g = create_group(self.file, f'telescopes/{tel_name}')
         g.attrs['telescope'] = tel_name
         g.attrs['primary_diam'] = primary_diam
         g.attrs['pixel_scale_arcsec'] = pixel_scale_arcsec
@@ -67,14 +66,14 @@ class Footprints(object):
         return None
 
     def save_source_catalog(self, seg_srcs, segment_index=0, column_names=None):
-        """
+        '''
         List the identified sources and associated properties for each segment.
 
         @param seg_srcs         An array or other (HDF5 compatible) struct with
                                 the source catalog information for the segment.
         @param segment_index    Integer index for the segment in the file
-        """
-        seg = create_group(self.file, 'Footprints/seg{:d}'.format(segment_index))
+        '''
+        seg = create_group(self.file, f'Footprints/seg{segment_index}')
         seg.create_dataset('catalog', data=seg_srcs.tolist())
         seg.attrs['num_sources'] = seg_srcs.shape[0]
         if column_names is not None:
@@ -92,19 +91,19 @@ class Footprints(object):
                     segment_index=0,
                     telescope='lsst',
                     filter_name='r'):
-        """
+        '''
         Save images for the Footprints from a single telescope
 
         The input lists should contain multiple epochs for a common segment,
         telescope, and bandpass.
-        """
+        '''
         segment_name = self._segment_group_name(segment_index, telescope,
             filter_name)
-        for iepoch, im in enumerate(image_list):
+        for iepoch in range(len(image_list)):
             seg = create_group(self.file,
-                segment_name + '/epoch_{:d}'.format(iepoch))
+                f'{segment_name}/epoch_{iepoch}')
             # image - background
-            seg.create_dataset('image', data=im)
+            seg.create_dataset('image', data=image_list[iepoch])
             # rms noise
             seg.create_dataset('noise', data=noise_list[iepoch])
             # Save the noise variance for a i.i.d. Gaussian noise model
@@ -126,19 +125,19 @@ class Footprints(object):
                         telescope='lsst',
                         filter_name='r',
                         model_names=None):
-        """
+        '''
         Save an image of the estimated PSF for each segment
 
         The elements of 'image_list' do not have to be images. In this case,
         specify how to parse the 'image' replacements with a list of descriptive
         strings in 'model_names'.
-        """
+        '''
         segment_name = self._segment_group_name(segment_index, telescope,
             filter_name)
-        for iepoch, im in enumerate(image_list):
+        for iepoch in range(len(image_list)):
             seg = create_group(self.file,
-                segment_name + '/epoch_{:d}'.format(iepoch))
-            seg.create_dataset('psf', data=im)
+                f'{segment_name}/epoch_{iepoch}')
+            seg.create_dataset('psf', data=image_list[iepoch])
             if model_names is None:
                 seg.attrs['psf_type'] = 'image'
             else: ### Assume a list of names of PSF model types
@@ -148,13 +147,12 @@ class Footprints(object):
     def save_bandpasses(self, filters_list, waves_nm_list, throughputs_list,
                         effective_wavelengths=None,
                         telescope='lsst'):
-        """
+        '''
         Save bandpasses for a single telescope as lookup tables.
-        """
+        '''
         tel_name = telescope.upper()
-        for i, filter_name in enumerate(filters_list):
-            group_name = 'telescopes/{}/filters/{}'.format(
-                tel_name, filter_name)
+        for i in range(len(filters_list)):
+            group_name = f'telescopes/{tel_name}/filters/{filters_list[i]}'
             if group_name not in self.file:
                 bp = create_group(self.file, group_name)
                 bp.create_dataset('waves_nm', data=waves_nm_list[i])
@@ -165,19 +163,17 @@ class Footprints(object):
         return None
 
 
-def load_image(infile, segment=0, telescope="LSST", filter_name="r", epoch=0):
-    """
+def load_image(infile, segment=0, telescope='LSST', filter_name='r', epoch=0):
+    '''
     Load a single epoch image from a Footprints file
-    """
+    '''
     hfile = h5py.File(infile, 'r')
-    grp = 'Footprints/seg{:d}/{}/{}/epoch_{:d}'.format(segment,
-                                                       telescope.lower(),
-                                                       filter_name, epoch)
+    grp = f'Footprints/seg{segment}/{telescope.lower()}/{filter_name}/epoch_{epoch}'
     grp = hfile[grp]
     img = grp['image'][...]
     noise_var = grp['noise'][...]
 
-    met = hfile['telescopes/{}'.format(telescope)]
+    met = hfile[f'telescopes/{telescope}']
     scale = met.attrs['pixel_scale_arcsec']
     gain = met.attrs['gain']
 

@@ -172,6 +172,8 @@ def load_image(infile, segment=0, telescope='LSST', filter_name='r', epoch=0):
     grp = hfile[grp]
     img = grp['image'][...]
     noise_var = grp['noise'][...]
+    mask = grp['segmask'][...]
+    bkg = grp['background'][...]
 
     met = hfile[f'telescopes/{telescope}']
     scale = met.attrs['pixel_scale_arcsec']
@@ -179,5 +181,5 @@ def load_image(infile, segment=0, telescope='LSST', filter_name='r', epoch=0):
 
     hfile.close()
 
-    return img, noise_var, scale, gain
+    return img, noise_var, mask, bkg, scale, gain
     
